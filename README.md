@@ -5,7 +5,7 @@ This repository contains code for my App, which should be capable of managing tr
 This repository solely the API accessing the database.
 ---
 # Implemented Security Measures
-The implemented Measures as well as thoughts on how they might fail / what needs to be changed to be production ready
+The implemented Measures:
 
 ## Authentication and Authorisation
 - Authentication is handled by another server. A simple verify request containing an authentication token will tell this server whether a user is authenticated. 
