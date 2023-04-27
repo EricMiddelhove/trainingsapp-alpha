@@ -1,8 +1,11 @@
-use std::{collections::HashMap, env, str::FromStr};
+use std::{
+    collections::HashMap,
+    env::{self, args_os},
+    str::FromStr,
+};
 
 use actix_web::{
-    http,
-    web::{self, Header},
+    web::{self},
     App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use mongodb::{
@@ -10,7 +13,6 @@ use mongodb::{
     options::{ClientOptions, ResolverConfig},
     Client,
 };
-use serde::__private::de::IdentifierDeserializer;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Trainingsplan {
@@ -21,10 +23,8 @@ struct Trainingsplan {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct InputTrainingsplan {
-    email: String,
     name: String,
     description: String,
-    auth_token: String,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -60,8 +60,14 @@ async fn get_new_client() -> Client {
     client
 }
 
-async fn authenticate_request(auth_token: String, email: &String) -> String {
+async fn authenticate_request(auth_token: String) -> (bool, Option<String>) {
     // Authenticate with auth server
+
+    #[derive(serde::Deserialize, serde::Serialize)]
+    struct AuthenticationResponse {
+        is_verified: bool,
+        owner: Option<String>,
+    }
 
     println!("Authenticating request...");
 
@@ -71,23 +77,18 @@ async fn authenticate_request(auth_token: String, email: &String) -> String {
     let mut map = HashMap::new();
     map.insert("verify_secret", verify_secret);
     map.insert("auth_token", auth_token);
-    map.insert("email", email.to_string());
 
     let client = surf::Client::new();
     let req = client
         .post(authenticate_url)
         .body_json(&map)
         .expect("req failed")
-        .recv_string();
-
-    // futures::future::try_join(req).await.expect("req failed");
+        .recv_json();
 
     println!("Awaiting response...");
-    let res = req.await.expect("req failed");
+    let res: AuthenticationResponse = req.await.expect("req failed");
 
-    println!("Response: {}", res);
-
-    res
+    (res.is_verified, res.owner)
 }
 
 async fn get_trainingsplan(req: HttpRequest) -> impl Responder {
@@ -109,14 +110,18 @@ async fn get_trainingsplan(req: HttpRequest) -> impl Responder {
 
     let id = req.query_string().split("=").collect::<Vec<&str>>()[1];
 
-    let is_authenticated: bool = authenticate_request(auth_token, &request_email)
-        .await
-        .parse()
-        .unwrap();
+    let authentication = authenticate_request(auth_token).await;
+
+    let is_authenticated = authentication.0;
+    let email = authentication.1;
 
     if is_authenticated == false {
         return HttpResponse::Unauthorized().body("Unauthorized");
     }
+
+    let email = email.unwrap();
+
+    // TODO: Authorization
 
     let client = get_new_client().await;
     let coll = client
@@ -141,21 +146,36 @@ async fn get_trainingsplan(req: HttpRequest) -> impl Responder {
     HttpResponse::Ok().json(output_trainingsplan)
 }
 
-async fn post_trainingsplan(info: web::Json<InputTrainingsplan>) -> impl Responder {
-    let auth_token = info.auth_token.clone();
-    let request_email: String = info.email.clone();
+async fn post_trainingsplan(
+    req: HttpRequest,
+    info: web::Json<InputTrainingsplan>,
+) -> impl Responder {
+    // let auth_token = info.auth_token.clone();
+    let auth_token = req
+        .headers()
+        .get("auth-token")
+        .unwrap()
+        .to_str()
+        .expect("auth-token header is not a string")
+        .to_string();
 
-    let is_authenticated = authenticate_request(auth_token, &request_email).await;
-    println!("is_authenticated: {}", is_authenticated);
+    let name: String = info.name.clone();
+    let description: String = info.description.clone();
 
-    if is_authenticated == "false" {
+    let authentication = authenticate_request(auth_token).await;
+
+    let is_authenticated = authentication.0;
+
+    if is_authenticated == false {
         return HttpResponse::Unauthorized().body("Unauthorized");
     }
 
+    let email = authentication.1.unwrap();
+
     let trainingsplan = Trainingsplan {
-        name: info.name.clone(),
-        description: info.description.clone(),
-        owner: info.email.clone(),
+        name: name.clone(),
+        description: description.clone(),
+        owner: email.clone(),
     };
 
     let doc = bson::to_document(&trainingsplan).unwrap();

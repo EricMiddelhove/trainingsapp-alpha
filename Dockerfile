@@ -1,5 +1,7 @@
 FROM rust
 
+USER executing_user
+
 WORKDIR /usr/src/myapp
 COPY . .
 

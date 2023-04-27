@@ -4,7 +4,6 @@ services:
     restart: always
     environment:
       MONGO_INITDB_DATABASE: auth-db
-
     ports:
       - 27017:27017
 
@@ -12,7 +11,7 @@ services:
     image: ericmiddelhove/trainingsapp-alpha:latest
     restart: always
     ports:
-      - 8081:3000
+      - 443:3000
     environment:
       - MONGO_URI=mongodb://auth-db:27017
       - RUST_BACKTRACE=1
